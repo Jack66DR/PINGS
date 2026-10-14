@@ -18,6 +18,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <memory>
+#include <new>
 #include <atomic>
 #include <cmath>
 #include <string>
@@ -67,7 +70,7 @@ namespace png
     class Engine
     {
     public:
-        Engine()
+        Engine() : core (makeCore(), &freeCore)
         {
             for (auto& s : uiScope) s.store (0.0f);
             for (auto& s : uiStrikeNote) s.store (0);
@@ -79,10 +82,10 @@ namespace png
             (void) seed;
             hostSr = hostRate;
             ratio = hostSr / kInternalRate;
-            part.Init (reverbA.data());
-            synth.Init (reverbB.data());
+            core->part.Init (core->reverbA);
+            core->synth.Init (core->reverbB);
             curModel = -1; curVoices = -1; curFx = -1;
-            onset.Init (8.0f / (float) kInternalRate, 160.0f / (float) kInternalRate, 1600.0f / (float) kInternalRate,
+            core->onset.Init (8.0f / (float) kInternalRate, 160.0f / (float) kInternalRate, 1600.0f / (float) kInternalRate,
                         (float) kInternalRate / (float) kBlock, 0.01f);
             hostCount = 0;
             nextT = 0.0;
@@ -206,19 +209,19 @@ namespace png
             const bool dp = model == kDisastrousPeace;
             if (model != curModel)
             {
-                if (! dp) part.set_model ((rings::ResonatorModel) model);
+                if (! dp) core->part.set_model ((rings::ResonatorModel) model);
                 curModel = model;
             }
             if (voices != curVoices)
             {
-                part.set_polyphony (voices);
-                synth.set_polyphony (voices);
+                core->part.set_polyphony (voices);
+                core->synth.set_polyphony (voices);
                 curVoices = voices;
                 if (activeVoice >= voices) activeVoice = 0;
             }
             if (p.fx != curFx)
             {
-                synth.set_fx ((rings::FxType) std::clamp (p.fx, 0, kNumFx - 1));
+                core->synth.set_fx ((rings::FxType) std::clamp (p.fx, 0, kNumFx - 1));
                 curFx = p.fx;
             }
 
@@ -229,8 +232,10 @@ namespace png
             sm[1] += c * (p.brightness - sm[1]);
             sm[2] += c * (p.damping - sm[2]);
             sm[3] += c * (p.position - sm[3]);
-            rings::Patch patch { std::clamp (sm[0], 0.0f, 0.9995f), std::clamp (sm[1], 0.0f, 1.0f),
-                                 std::clamp (sm[2], 0.0f, 1.0f), std::clamp (sm[3], 0.0f, 1.0f) };
+            // all four stop at 0.9995, as the module already does for STRUCTURE: at exactly 1.0 its table
+            // lookups read one entry past the end
+            rings::Patch patch { std::clamp (sm[0], 0.0f, 0.9995f), std::clamp (sm[1], 0.0f, 0.9995f),
+                                 std::clamp (sm[2], 0.0f, 0.9995f), std::clamp (sm[3], 0.0f, 0.9995f) };
 
             // STRUCTURE picks the chord, with the module's hysteresis
             const float ch = std::clamp (p.structure, 0.0f, 1.0f) * (float) (kNumChords - 1);
@@ -251,7 +256,7 @@ namespace png
             else
                 std::fill (gated.begin(), gated.end(), 0.0f);
 
-            const bool hit = p.useInput && p.onset && onset.Process (gated.data(), (size_t) kBlock);
+            const bool hit = p.useInput && p.onset && core->onset.Process (gated.data(), (size_t) kBlock);
 
             // strums: queued notes first, one at a time, then onsets in the input
             bool strum = false;
@@ -282,9 +287,9 @@ namespace png
             ps.chord = chord;
 
             if (dp)
-                synth.Process (ps, patch, gated.data(), out.data(), aux.data(), (size_t) kBlock);
+                core->synth.Process (ps, patch, gated.data(), out.data(), aux.data(), (size_t) kBlock);
             else
-                part.Process (ps, patch, gated.data(), out.data(), aux.data(), (size_t) kBlock);
+                core->part.Process (ps, patch, gated.data(), out.data(), aux.data(), (size_t) kBlock);
 
             if (strum)
             {
@@ -322,10 +327,30 @@ namespace png
 
         static constexpr float kGate = 0.00003f;
 
-        rings::Part part;
-        rings::StringSynthPart synth;
-        rings::OnsetDetector onset;
-        std::array<uint16_t, 32768> reverbA {}, reverbB {};
+        // Rings' objects, in zeroed memory. On the module they're globals, which the chip zeroes at power-on,
+        // and some of their state (the reverb's filters, the strum pattern counter) is never set by Init().
+        // Ordinary plugin memory isn't zeroed, so they get the same clean start here explicitly.
+        struct Core
+        {
+            rings::Part part;
+            rings::StringSynthPart synth;
+            rings::OnsetDetector onset;
+            uint16_t reverbA[32768];
+            uint16_t reverbB[32768];
+        };
+        static Core* makeCore()
+        {
+            void* m = std::calloc (1, sizeof (Core));
+            if (m == nullptr) throw std::bad_alloc();
+            return new (m) Core;   // default-initialised: their empty constructors leave the zeroes alone
+        }
+        static void freeCore (Core* c)
+        {
+            if (c == nullptr) return;
+            c->~Core();
+            std::free (c);
+        }
+        std::unique_ptr<Core, void (*) (Core*)> core;
 
         double hostSr = 48000.0, ratio = 1.0, nextT = 0.0;
         int64_t hostCount = 0, outCount = 0;
