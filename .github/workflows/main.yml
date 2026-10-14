@@ -29,7 +29,13 @@ jobs:
         run: grep -E "error|Error" build.log | head -25 | while IFS= read -r l; do echo "::error::$l"; done
 
       - name: Run offline engine test
-        run: ./build/PINGS_Test
+        run: |
+          set -o pipefail
+          ./build/PINGS_Test 2>&1 | tee test.log
+
+      - name: Report test output
+        if: failure()
+        run: tail -12 test.log | while IFS= read -r l; do echo "::error::$l"; done
 
       - name: Sign (ad hoc) and zip
         run: |

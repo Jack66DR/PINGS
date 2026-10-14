@@ -113,6 +113,7 @@ int main()
 #elif defined(__aarch64__)
     { uint64_t fpcr; asm volatile ("mrs %0, fpcr" : "=r" (fpcr)); fpcr |= (1ull << 24); asm volatile ("msr fpcr, %0" :: "r" (fpcr)); }
 #endif
+    std::setvbuf (stdout, nullptr, _IONBF, 0);   // so a crash still shows how far it got
     std::printf ("PINGS offline engine test\n");
     auto silent = [] (double) { return 0.0f; };
 
