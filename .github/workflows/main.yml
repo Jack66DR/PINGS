@@ -20,7 +20,13 @@ jobs:
             -DPNG_BUILD_TESTS=ON
 
       - name: Build AU, VST3 and the engine test
-        run: cmake --build build --config Release --target PINGS_AU PINGS_VST3 PINGS_Test -j 4
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --target PINGS_AU PINGS_VST3 PINGS_Test -j 4 2>&1 | tee build.log
+
+      - name: Report compile errors
+        if: failure()
+        run: grep -E "error|Error" build.log | head -25 | while IFS= read -r l; do echo "::error::$l"; done
 
       - name: Run offline engine test
         run: ./build/PINGS_Test
