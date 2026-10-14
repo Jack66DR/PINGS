@@ -14,7 +14,7 @@ from a side chain, and the keys just choose the notes while the input does the s
 
 The Rings DSP and the parts of stmlib it needs are in `ThirdParty/mutable`, copied unmodified from
 [pichenettes/eurorack](https://github.com/pichenettes/eurorack) and
-[pichenettes/stmlib](https://github.com/pichenettes/stmlib) (commits in `ThirdParty/mutable/VERSION`).
+[pichenettes/stmlib](https://github.com/pichenettes/stmlib) (commits in `ThirdParty/mutable/SOURCE_COMMITS.txt`).
 They are copyright Emilie Gillet and released under the MIT licence; the notice is in
 `ThirdParty/mutable/LICENSE` and at the top of each file, and stays with them.
 
